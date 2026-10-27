@@ -44,7 +44,7 @@ def analytic_observation(
     xi[..., 1:30] is the encoder bias: observed joint positions are ``q + bias - q0``.
     """
     _, root_quat, q, _, ang_b, qd = split_state(s)
-    bias = xi[..., 1:30]
+    bias = xi[..., 1 : 1 + q.shape[-1]]
     return torch.cat([q + bias - default_joint_pos, qd, ang_b, projected_gravity(root_quat), prev_action], dim=-1)
 
 
