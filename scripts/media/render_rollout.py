@@ -76,15 +76,14 @@ def pretty(name: str) -> str:
     return base.replace("_", " ")
 
 
-def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None, width: int = 1280, height: int = 720,
+def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None, width: int = 1280, height: int = 720, robot: str = "g1",
          azimuth: float = 140.0, elevation: float = -14.0, distance: float = 2.7, ghost: bool = True, label: bool = True, clips: list[str] | None = None,
          concat: Path | None = None, segments: list[str] | None = None, titles: list[str] | None = None) -> None:
     """``segments``: per-clip time windows as ``name:start:end`` (seconds); ``titles``: ``name=Display title`` overrides."""
 
     import sys
 
-    robot_name = sys.argv[3] if len(sys.argv) > 3 else "g1"
-    xml = Path(get_robot(robot_name).xml_path())
+    xml = Path(get_robot(robot).xml_path())
     model = mujoco.MjModel.from_xml_string(two_robot_xml(xml, "pelvis"))
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height, width)
