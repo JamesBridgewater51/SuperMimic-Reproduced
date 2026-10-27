@@ -137,8 +137,8 @@ class MotionLibrary:
 
         if ref_chunks is not None:
             ref_np = np.concatenate(ref_chunks, 0)
-            assert ref_np.shape[1] == 7 + 2 * q0.numel(), (
-                f"ref dim {ref_np.shape[1]} != 7+2*{q0.numel()}; npz robot mismatch?"
+            assert ref_np.shape[1] == 13 + 2 * q0.numel(), (
+                f"ref dim {ref_np.shape[1]} != 13+2*{q0.numel()}; npz robot mismatch?"
             )
             self._ref = torch.as_tensor(ref_np, device=self.device, dtype=store_dtype if compact else dtype)
             del ref_np, ref_chunks
