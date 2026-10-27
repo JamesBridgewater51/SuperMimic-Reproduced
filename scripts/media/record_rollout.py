@@ -32,7 +32,7 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
     args = SuperMimicEnvCfgArgs(
         npz_files=files, num_envs=n, future_frames=cfg["env"]["future_frames"], episode_length_s=1.0e5,
         action_noise_std=0.0, obs_noise=False, reset_noise=False, domain_randomization=False, sampling_mode="start",
-        record_transitions=False, seed=0, anchor_obs=cfg["env"].get("anchor_obs", False),
+        record_transitions=False, seed=0, anchor_obs=cfg["env"].get("anchor_obs", False), robot=cfg["env"].get("robot", "g1"),
     )
     env = make_env(args, device=device)
     try:
