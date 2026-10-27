@@ -109,7 +109,8 @@ class AnalyticHeads:
         self.reward_cfg = reward_cfg or TrackingRewardCfg()
 
     def robot_bodies(self, s: torch.Tensor) -> dict[str, torch.Tensor]:
-        out = self.fk(s[..., :36], s[..., 36:])
+        nq = (s.shape[-1] + 1) // 2  # 7 + nj  (g1 36, x2 38)
+        out = self.fk(s[..., :nq], s[..., nq:])
         idx = self.tracked_idx
         return {
             "pos": out["pos"][..., idx, :],
