@@ -73,8 +73,11 @@ class StateSpec:
         self.err_scale = rep(cfg.err_scale, (3, 3, 3, 3, nj, nj)).to(device=device, dtype=dtype)
         self.out_scale = rep(cfg.out_scale, (3, 3, nj, 3, 3, nj)).to(device=device, dtype=dtype)
         self.in_scale = rep(cfg.in_scale, (1, 6, 3, 3, nj, nj)).to(device=device, dtype=dtype)
-        self.xi_offset = torch.tensor(cfg.xi_offset, device=device, dtype=dtype)
-        self.xi_scale = torch.tensor(cfg.xi_scale, device=device, dtype=dtype)
+        # Rebuild xi normalisation from num_joints here: cfg tuples were fixed at
+        # dataclass construction (default g1) and the trainer reassigns num_joints
+        # afterwards, so cfg.xi_offset/xi_scale may be stale.
+        self.xi_offset = torch.tensor((0.75,) + (0.0,) * nj + (0.0,) * 3, device=device, dtype=dtype)
+        self.xi_scale = torch.tensor((0.45,) + (0.01,) * nj + (0.05,) * 3, device=device, dtype=dtype)
 
     # ------------------------------------------------------------------ split / features
 
