@@ -32,6 +32,7 @@ class Trainer:
 
         _n = len(get_robot(cfg.env.robot).joint_names)
         cfg.policy.num_joints = _n
+        cfg.world_model.state_spec.num_joints = _n
         cfg.policy.goal_dim = cfg.env.future_frames * (2 * _n + 10) + (9 if cfg.env.anchor_obs else 0)
         cfg.policy_trainer.anchor_obs = cfg.env.anchor_obs
         self.rank, local_rank, self.world = init_distributed()

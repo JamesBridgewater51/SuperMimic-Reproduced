@@ -53,9 +53,15 @@ class StateSpecCfg:
     # Input feature scales for [root_z, rot6d, lin_vel_h, ang_vel_b, joint_pos, joint_vel] (divide by these).
     in_scale: tuple[float, ...] = (1.0, 1.0, 1.0, 2.0, 1.0, 5.0)
     explicit_integration: bool = True
+    num_joints: int = 29  # g1 default; x2 = 31 (set by the training loop)
     # xi normalisation: (offset, scale) for friction, encoder bias, com offset.
     xi_offset: tuple[float, ...] = field(default_factory=lambda: (0.75,) + (0.0,) * 29 + (0.0,) * 3)
     xi_scale: tuple[float, ...] = field(default_factory=lambda: (0.45,) + (0.01,) * 29 + (0.05,) * 3)
+
+    def __post_init__(self):
+        nj = self.num_joints
+        self.xi_offset = (0.75,) + (0.0,) * nj + (0.0,) * 3
+        self.xi_scale = (0.45,) + (0.01,) * nj + (0.05,) * 3
 
 
 class StateSpec:
@@ -63,9 +69,10 @@ class StateSpec:
         self.cfg = cfg
         self.dt = cfg.dt
         rep = lambda scales, sizes: torch.cat([torch.full((n,), float(s)) for s, n in zip(scales, sizes)])  # noqa: E731
-        self.err_scale = rep(cfg.err_scale, (3, 3, 3, 3, NJ, NJ)).to(device=device, dtype=dtype)
-        self.out_scale = rep(cfg.out_scale, (3, 3, NJ, 3, 3, NJ)).to(device=device, dtype=dtype)
-        self.in_scale = rep(cfg.in_scale, (1, 6, 3, 3, NJ, NJ)).to(device=device, dtype=dtype)
+        nj = cfg.num_joints
+        self.err_scale = rep(cfg.err_scale, (3, 3, 3, 3, nj, nj)).to(device=device, dtype=dtype)
+        self.out_scale = rep(cfg.out_scale, (3, 3, nj, 3, 3, nj)).to(device=device, dtype=dtype)
+        self.in_scale = rep(cfg.in_scale, (1, 6, 3, 3, nj, nj)).to(device=device, dtype=dtype)
         self.xi_offset = torch.tensor(cfg.xi_offset, device=device, dtype=dtype)
         self.xi_scale = torch.tensor(cfg.xi_scale, device=device, dtype=dtype)
 
