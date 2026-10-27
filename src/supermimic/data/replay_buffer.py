@@ -39,6 +39,7 @@ class StartBatch:
 class ReplayBuffer:
     def __init__(self, num_envs: int, capacity: int, state_dim: int, act_dim: int, xi_dim: int, device):
         self.E, self.T = num_envs, capacity
+        self.act_dim = act_dim
         self.device = torch.device(device)
         E, T = num_envs, capacity
         f = lambda *shape: torch.zeros(E, T, *shape, device=self.device)  # noqa: E731
