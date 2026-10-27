@@ -245,9 +245,9 @@ class MotionLibrary:
         offs = torch.arange(k, device=self.device)
         idx = torch.minimum(frame[:, None] + offs[None, :], last[:, None])  # (N,k)
         if not self.compact:
-            return self.goal_feat[idx].reshape(frame.shape[0], k * GOAL_FEAT_DIM)
+            return self.goal_feat[idx].reshape(frame.shape[0], k * self.goal_feat.shape[-1])
         feat = goal_features(self.ref(idx.reshape(-1)), self.default_joint_pos)
-        return feat.reshape(frame.shape[0], k * GOAL_FEAT_DIM)
+        return feat.reshape(frame.shape[0], k * feat.shape[-1])
 
     def ref_qpos_qvel(self, frame: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """MuJoCo-layout reference state: qpos (N,36) and qvel (N,35; root ang vel in body frame)."""
