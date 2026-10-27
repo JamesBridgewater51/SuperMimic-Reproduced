@@ -83,7 +83,9 @@ class MotionLibrary:
         bin_frames: int = 50,
         compact: bool = False,
         store_dtype: torch.dtype = torch.float16,
+        robot: str = "g1",
     ):
+        self.robot_name = robot
         self.device = torch.device(device)
         self.dtype = dtype
         self.body_names = tuple(body_names)
@@ -147,10 +149,10 @@ class MotionLibrary:
             del body_chunks
             self.goal_feat = goal_features(self._split(self._ref), q0)
         else:
-            from supermimic.data.motion_convert import load_g1_model
             from supermimic.kinematics.g1_fk import G1Kinematics
+            from supermimic.robots import load_robot_model
 
-            self._fk = G1Kinematics(load_g1_model(), device=self.device, dtype=dtype)
+            self._fk = G1Kinematics(load_robot_model(self.robot_name), device=self.device, dtype=dtype)
             self._tracked_idx = self._fk.body_indices(self.body_names)
 
         self.clip_start = torch.tensor([c.start for c in clips], device=self.device, dtype=torch.long)

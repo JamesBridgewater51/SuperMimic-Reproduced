@@ -20,19 +20,20 @@ from pathlib import Path
 import tyro
 
 _MODEL = None
+_ROBOT = "g1"
 
 
 def _init_worker() -> None:
     global _MODEL
     # Keep BLAS single-threaded inside workers.
     os.environ.setdefault("OMP_NUM_THREADS", "1")
-    from supermimic.data.motion_convert import load_g1_model
+    from supermimic.robots import load_robot_model
 
-    _MODEL = load_g1_model()
+    _MODEL = load_robot_model(_ROBOT)
 
 
 def _convert_one(args: tuple[str, str, float, float]) -> dict:
-    from supermimic.data.motion_convert import convert_csv_to_npz
+    from supermimic.data.motion_convert import convert_csv_to_npz  # robot inferred from CSV header
 
     src, dst, in_fps, out_fps = args
     try:
@@ -54,7 +55,10 @@ def main(
     fps_map: Path | None = None,
     overwrite: bool = False,
     limit: int | None = None,
+    robot: str = "g1",
 ) -> None:
+    global _ROBOT
+    _ROBOT = robot
     files = sorted(input_dir.glob(pattern))
     if limit is not None:
         files = files[:limit]

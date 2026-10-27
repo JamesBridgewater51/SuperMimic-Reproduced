@@ -54,6 +54,7 @@ class MultiClipMotionCommand(CommandTerm):
         self.library = MotionLibrary(
             cfg.npz_files, cfg.body_names, default_joint_pos, device=self.device, bin_frames=cfg.bin_frames,
             compact=cfg.compact_library, store_dtype=torch.float16 if cfg.library_fp16 else torch.float32,
+            robot=cfg.robot,
         )
         print(f"[INFO] {self.library.summary()}")
         lib = self.library
@@ -397,6 +398,7 @@ class MultiClipMotionCommand(CommandTerm):
 @dataclass(kw_only=True)
 class MultiClipMotionCommandCfg(CommandTermCfg):
     npz_files: list[str]
+    robot: str = "g1"
     anchor_body_name: str
     root_body_name: str = "pelvis"
     body_names: tuple[str, ...]

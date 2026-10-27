@@ -157,20 +157,26 @@ def csv_format(path: str | Path) -> str:
     return "bones" if first.startswith(BONES_HEADER_PREFIX) else "lafan1"
 
 
-def load_csv(path: str | Path) -> np.ndarray:
-    """Load a G1 retarget CSV in either format. Returns float64 (N, 36) in the LAFAN1 layout:
-    root position (m), root quaternion **xyzw**, 29 joint angles (rad) in G1_JOINT_NAMES order."""
+def load_csv(path: str | Path, joint_names: tuple[str, ...] = G1_JOINT_NAMES) -> np.ndarray:
+    """Load a retarget CSV in either format. Returns float64 (N, 7+len(joint_names)) in the
+    LAFAN1 layout: root position (m), root quaternion **xyzw**, joint angles (rad) in
+    ``joint_names`` order. Columns are resolved BY NAME (BONES G1 uses ``<joint>_dof``,
+    the X2 retarget uses the bare joint name), so CSV column order does not matter."""
     import pandas as pd
 
+    n = len(joint_names)
     if csv_format(path) == "bones":
-        # BONES-SEED G1 CSV (same parsing as SONIC's convert_soma_csv_to_motion_lib.py):
+        # BONES-SEED convention (same parsing as SONIC's convert_soma_csv_to_motion_lib.py):
         # centimeters -> metres, Euler 'xyz' degrees -> quaternion, joint degrees -> radians.
         df = pd.read_csv(path)
-        cols = list(df.columns)
-        joint_cols = [c for c in cols if c.endswith("_joint_dof")]
-        expected = [f"{n}_dof" for n in G1_JOINT_NAMES]
-        if joint_cols != expected:
-            raise ValueError(f"{path}: joint columns differ from G1 order: {joint_cols[:5]}...")
+        joint_cols = []
+        for j in joint_names:
+            for cand in (f"{j}_dof", j):
+                if cand in df.columns:
+                    joint_cols.append(cand)
+                    break
+            else:
+                raise ValueError(f"{path}: no column for joint {j!r}")
         pos = df[["root_translateX", "root_translateY", "root_translateZ"]].to_numpy(np.float64) / 100.0
         eul = df[["root_rotateX", "root_rotateY", "root_rotateZ"]].to_numpy(np.float64)
         quat_xyzw = Rotation.from_euler("xyz", eul, degrees=True).as_quat()
@@ -178,8 +184,8 @@ def load_csv(path: str | Path) -> np.ndarray:
         arr = np.concatenate([pos, quat_xyzw, joints], axis=1)
     else:
         arr = pd.read_csv(path, header=None, dtype=np.float64).to_numpy()
-    if arr.ndim != 2 or arr.shape[1] != 7 + NUM_JOINTS:
-        raise ValueError(f"{path}: expected (N, {7 + NUM_JOINTS}) got {arr.shape}")
+    if arr.ndim != 2 or arr.shape[1] != 7 + n:
+        raise ValueError(f"{path}: expected (N, {7 + n}) got {arr.shape}")
     return arr
 
 
@@ -312,8 +318,19 @@ def convert_csv_to_npz(
     model: mujoco.MjModel | None = None,
 ) -> dict:
     """Convert one CSV to an mjlab-compatible npz. Returns a small summary dict."""
-    model = model or load_g1_model()
-    raw = load_csv(csv_path)
+    from supermimic.robots import get_robot
+
+    if model is not None:
+        names = tuple(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(1, model.njnt))
+    else:  # infer from the CSV header when no model is given
+        import pandas as pd
+
+        head = pd.read_csv(csv_path, nrows=0)
+        names = get_robot("x2" if "head_yaw_joint" in head.columns else "g1").joint_names
+        from supermimic.robots import load_robot_model
+
+        model = load_robot_model("x2" if "head_yaw_joint" in head.columns else "g1")
+    raw = load_csv(csv_path, names)
     motion = resample_motion(raw, input_fps, output_fps)
     bodies = forward_kinematics(model, motion)
     out_path = Path(out_path)
@@ -327,7 +344,7 @@ def convert_csv_to_npz(
         body_quat_w=bodies.quat_w.astype(np.float32),
         body_lin_vel_w=bodies.lin_vel_w.astype(np.float32),
         body_ang_vel_w=bodies.ang_vel_w.astype(np.float32),
-        joint_names=np.array(G1_JOINT_NAMES),
+        joint_names=np.array(names),
         body_names=np.array(bodies.body_names),
         source=np.array(str(csv_path)),
         input_fps=np.array([input_fps], dtype=np.float32),

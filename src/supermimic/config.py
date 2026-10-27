@@ -33,6 +33,7 @@ class EnvCfg:
     future_frames: int = 10
     compact_library: bool = False
     anchor_obs: bool = False
+    robot: str = "g1"
 
 
 @dataclass

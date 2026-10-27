@@ -11,7 +11,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from supermimic.config import TrainConfig
-from supermimic.data.motion_convert import load_g1_model
+from supermimic.robots import load_robot_model
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
 from supermimic.envs.tracking_env_cfg import ANCHOR_BODY, ROOT_BODY, TRACKED_BODIES
@@ -67,6 +67,7 @@ class Trainer:
                 replay_capacity=cfg.env.replay_capacity,
                 compact_library=cfg.env.compact_library,
                 anchor_obs=cfg.env.anchor_obs,
+                robot=cfg.env.robot,
                 seed=cfg.seed + 1000 * self.rank,
             ),
             device=self.device,
@@ -78,7 +79,7 @@ class Trainer:
         self.buffer = self.recorder.buffer
         robot = env.scene["robot"]
 
-        fk = G1Kinematics(load_g1_model(), device=self.device)
+        fk = G1Kinematics(load_robot_model(cfg.env.robot), device=self.device)
         heads = AnalyticHeads(fk, TRACKED_BODIES, ANCHOR_BODY, ROOT_BODY, robot.data.soft_joint_pos_limits[0].clone(), robot.data.default_joint_pos[0].clone())
         self.wm = WorldModel(cfg.world_model, heads, self.device)
         self.policy = Policy(cfg.policy).to(self.device)
