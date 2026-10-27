@@ -62,8 +62,9 @@ class MotionEncoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, cfg: PolicyCfg, obs_dim: int = 930):
+    def __init__(self, cfg: PolicyCfg, obs_dim: int | None = None):
         super().__init__()
+        obs_dim = obs_dim if obs_dim is not None else cfg.history * (3 * cfg.num_joints + 6)
         self.mlp = MLP(cfg.latent_dim + obs_dim, cfg.decoder_hidden, cfg.num_joints, last_gain=cfg.decoder_last_gain)
         self.register_buffer("scale", _obs_scale_vector(cfg))
 
@@ -87,9 +88,11 @@ class Policy(nn.Module):
 class Critic(nn.Module):
     """V(canonical state 71, goal 680, xi 33, root error 4) -> scalar (one per interface)."""
 
-    def __init__(self, cfg: CriticCfg, feat_dim: int = 71, goal_dim: int | None = None, xi_dim: int = 33, pcfg: PolicyCfg | None = None):
+    def __init__(self, cfg: CriticCfg, feat_dim: int | None = None, goal_dim: int | None = None, xi_dim: int | None = None, pcfg: PolicyCfg | None = None):
         super().__init__()
         pcfg = pcfg or PolicyCfg()
+        feat_dim = feat_dim if feat_dim is not None else 13 + 2 * pcfg.num_joints
+        xi_dim = xi_dim if xi_dim is not None else 4 + pcfg.num_joints
         goal_dim = goal_dim or pcfg.goal_dim
         self.mlp = MLP(feat_dim + goal_dim + xi_dim + 4, cfg.hidden, 1)
         self.register_buffer("goal_scale", _goal_scale_vector(pcfg, goal_dim))
