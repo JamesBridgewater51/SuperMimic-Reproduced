@@ -18,7 +18,7 @@ import tyro
 
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
-from supermimic.envs.state_io import NQ, StateIO
+from supermimic.envs.state_io import StateIO
 from supermimic.eval.benchmark import load_policy_from_checkpoint
 
 
@@ -50,7 +50,7 @@ def main(ckpt: Path, clips: list[str], npz_dir: Path = Path("data/npz/bones_seed
         steps = torch.zeros(n, dtype=torch.long, device=device)
 
         def snapshot() -> None:
-            rob.append(io.read()[:, :NQ].cpu().numpy())
+            rob.append(io.read()[:, : io.nq].cpu().numpy())
             ref.append(lib.ref_qpos_qvel(cmd.frame)[0].cpu().numpy())
 
         snapshot()

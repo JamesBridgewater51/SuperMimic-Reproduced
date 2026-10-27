@@ -18,7 +18,7 @@ import numpy as np
 import tyro
 from PIL import Image, ImageDraw, ImageFont
 
-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import G1_XML
+from supermimic.robots import get_robot
 
 GHOST_RGBA = "0.25 0.50 1.0 0.22"
 
@@ -81,7 +81,11 @@ def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None,
          concat: Path | None = None, segments: list[str] | None = None, titles: list[str] | None = None) -> None:
     """``segments``: per-clip time windows as ``name:start:end`` (seconds); ``titles``: ``name=Display title`` overrides."""
 
-    model = mujoco.MjModel.from_xml_string(two_robot_xml(Path(G1_XML), "pelvis"))
+    import sys
+
+    robot_name = sys.argv[3] if len(sys.argv) > 3 else "g1"
+    xml = Path(get_robot(robot_name).xml_path())
+    model = mujoco.MjModel.from_xml_string(two_robot_xml(xml, "pelvis"))
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height, width)
     opt = mujoco.MjvOption()
