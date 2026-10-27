@@ -94,7 +94,7 @@ class ReplayRecorder(RecorderTerm):
         # Terminal row: the state reached by the last action (no transition out of it).
         cmd = self.command
         s_next = self.state_io.read()[env_ids]
-        zeros_a = torch.zeros(env_ids.numel(), 29, device=env.device)
+        zeros_a = torch.zeros(env_ids.numel(), self.buffer.act_dim, device=env.device)
         self.buffer.add(
             env_ids,
             s=s_next,
