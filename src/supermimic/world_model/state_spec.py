@@ -102,9 +102,11 @@ class StateSpec:
     # ------------------------------------------------------------------ integration
 
     def integrate(self, s: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
-        """Apply the (unscaled) network output ``delta`` (…, 70) to state ``s`` (…, 71)."""
+        """Apply the (unscaled) network output ``delta`` (…, 12+2nj) to state ``s`` (…, 13+2nj)."""
         d = delta * self.out_scale
-        dv_h, dw_b, dqd, dp_h, dth_b, dq = d[..., 0:3], d[..., 3:6], d[..., 6:35], d[..., 35:38], d[..., 38:41], d[..., 41:70]
+        nj = (s.shape[-1] - 13) // 2
+        dv_h, dw_b, dqd = d[..., 0:3], d[..., 3:6], d[..., 6 : 6 + nj]
+        dp_h, dth_b, dq = d[..., 6 + nj : 9 + nj], d[..., 9 + nj : 12 + nj], d[..., 12 + nj :]
         p, q, qj, v, w, qd = self.split(s)
         q = quat_normalize(q)
         hq = heading_quat(q)
