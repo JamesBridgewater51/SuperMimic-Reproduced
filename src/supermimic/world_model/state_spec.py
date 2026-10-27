@@ -73,7 +73,8 @@ class StateSpec:
 
     @staticmethod
     def split(s: torch.Tensor):
-        return s[..., 0:3], s[..., 3:7], s[..., 7:36], s[..., 36:39], s[..., 39:42], s[..., 42:71]
+        nj = (s.shape[-1] - 13) // 2
+        return s[..., 0:3], s[..., 3:7], s[..., 7 : 7 + nj], s[..., 7 + nj : 10 + nj], s[..., 10 + nj : 13 + nj], s[..., 13 + nj :]
 
     def canonical(self, s: torch.Tensor) -> torch.Tensor:
         """Heading-invariant, scaled network input features (…, 71)."""

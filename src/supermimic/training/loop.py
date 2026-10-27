@@ -28,7 +28,11 @@ from supermimic.world_model.world_model import WorldModel
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
-        cfg.policy.goal_dim = cfg.env.future_frames * 68 + (9 if cfg.env.anchor_obs else 0)
+        from supermimic.robots import get_robot
+
+        _n = len(get_robot(cfg.env.robot).joint_names)
+        cfg.policy.num_joints = _n
+        cfg.policy.goal_dim = cfg.env.future_frames * (2 * _n + 10) + (9 if cfg.env.anchor_obs else 0)
         cfg.policy_trainer.anchor_obs = cfg.env.anchor_obs
         self.rank, local_rank, self.world = init_distributed()
         self.is_main = self.rank == 0

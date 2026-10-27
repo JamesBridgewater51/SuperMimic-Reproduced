@@ -175,7 +175,11 @@ class MotionLibrary:
 
     @staticmethod
     def _split(r: torch.Tensor) -> RefState:
-        return RefState(r[..., 0:3], r[..., 3:7], r[..., 7:36], r[..., 36:39], r[..., 39:42], r[..., 42:71])
+        nj = (r.shape[-1] - 13) // 2  # layout: pos3 quat4 joint[nj] lin3 ang3 jvel[nj]
+        return RefState(
+            r[..., 0:3], r[..., 3:7], r[..., 7 : 7 + nj],
+            r[..., 7 + nj : 10 + nj], r[..., 10 + nj : 13 + nj], r[..., 13 + nj :],
+        )
 
     def ref(self, frame: torch.Tensor) -> RefState:
         return self._split(self._ref[frame].to(self.dtype))
@@ -203,20 +207,28 @@ class MotionLibrary:
         return self._ref[:, 3:7].to(self.dtype)
 
     @property
+    def _nj(self) -> int:
+        return (self._ref.shape[1] - 13) // 2
+
+    @property
     def joint_pos(self) -> torch.Tensor:
-        return self._ref[:, 7:36].to(self.dtype)
+        nj = self._nj
+        return self._ref[:, 7 : 7 + nj].to(self.dtype)
 
     @property
     def root_lin_vel_w(self) -> torch.Tensor:
-        return self._ref[:, 36:39].to(self.dtype)
+        nj = self._nj
+        return self._ref[:, 7 + nj : 10 + nj].to(self.dtype)
 
     @property
     def root_ang_vel_w(self) -> torch.Tensor:
-        return self._ref[:, 39:42].to(self.dtype)
+        nj = self._nj
+        return self._ref[:, 10 + nj : 13 + nj].to(self.dtype)
 
     @property
     def joint_vel(self) -> torch.Tensor:
-        return self._ref[:, 42:71].to(self.dtype)
+        nj = self._nj
+        return self._ref[:, 13 + nj :].to(self.dtype)
 
     # ------------------------------------------------------------------ queries
 

@@ -17,14 +17,23 @@ from supermimic.envs.mdp.rewards import TrackingRewardCfg, tracking_reward_terms
 from supermimic.kinematics.g1_fk import G1Kinematics
 from supermimic.kinematics.rotations import projected_gravity, quat_apply_inverse
 
-OBS_DIM = 93
+OBS_DIM = 93  # g1; per-robot via obs_terms(n)/obs_dim(n)
 # Term layout of the ``policy`` observation group (order matters: term-major history).
-OBS_TERMS = (("joint_pos", 29), ("joint_vel", 29), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", 29))
+OBS_TERMS = (("joint_pos", 29), ("joint_vel", 29), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", 29))  # g1
+
+
+def obs_terms(n_joints: int):
+    return (("joint_pos", n_joints), ("joint_vel", n_joints), ("base_ang_vel", 3), ("projected_gravity", 3), ("actions", n_joints))
+
+
+def obs_dim(n_joints: int) -> int:
+    return 3 * n_joints + 6
 
 
 def split_state(s: torch.Tensor):
-    """-> root_pos (…,3), root_quat (…,4), joint_pos (…,29), root_lin_vel_w (…,3), root_ang_vel_b (…,3), joint_vel (…,29)."""
-    return s[..., 0:3], s[..., 3:7], s[..., 7:36], s[..., 36:39], s[..., 39:42], s[..., 42:71]
+    """-> root_pos (…,3), root_quat (…,4), joint_pos (…,nj), root_lin_vel_w (…,3), root_ang_vel_b (…,3), joint_vel (…,nj)."""
+    nj = (s.shape[-1] - 13) // 2
+    return s[..., 0:3], s[..., 3:7], s[..., 7 : 7 + nj], s[..., 7 + nj : 10 + nj], s[..., 10 + nj : 13 + nj], s[..., 13 + nj :]
 
 
 def analytic_observation(
@@ -56,10 +65,11 @@ ANCHOR_OBS_DIM = 9
 
 def flatten_history_term_major(hist: torch.Tensor) -> torch.Tensor:
     """(H, N, 93) oldest→newest  ->  (N, 930) in mjlab's term-major layout [A_t0..A_tH-1, B_t0..]."""
-    H, N, _ = hist.shape
+    H, N, w = hist.shape
+    nj = (w - 6) // 3
     chunks = []
     start = 0
-    for _, d in OBS_TERMS:
+    for _, d in obs_terms(nj):
         chunks.append(hist[:, :, start : start + d].permute(1, 0, 2).reshape(N, H * d))
         start += d
     return torch.cat(chunks, dim=-1)
@@ -125,7 +135,7 @@ class AnalyticHeads:
             anchor_index=self.anchor_index,
             action=action,
             prev_action=prev_action,
-            joint_pos=s_next[..., 7:36],
+            joint_pos=split_state(s_next)[2],
             soft_limits=self.soft_limits,
             cfg=self.reward_cfg,
         )
