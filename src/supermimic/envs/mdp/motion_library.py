@@ -31,7 +31,7 @@ import torch
 from supermimic.kinematics.rotations import projected_gravity, quat_apply_inverse, yaw_quat
 
 GOAL_FEAT_DIM = 68
-REF_DIM = 71
+REF_DIM = 71  # g1 (3+4+29+3+3+29); x2 is 75 — the loader asserts 7+2*nj against q0
 
 
 @dataclass
@@ -137,7 +137,9 @@ class MotionLibrary:
 
         if ref_chunks is not None:
             ref_np = np.concatenate(ref_chunks, 0)
-            assert ref_np.shape[1] == REF_DIM
+            assert ref_np.shape[1] == 7 + 2 * q0.numel(), (
+                f"ref dim {ref_np.shape[1]} != 7+2*{q0.numel()}; npz robot mismatch?"
+            )
             self._ref = torch.as_tensor(ref_np, device=self.device, dtype=store_dtype if compact else dtype)
             del ref_np, ref_chunks
         if not compact:
