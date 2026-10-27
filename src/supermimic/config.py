@@ -53,6 +53,7 @@ class ScheduleCfg:
 class TrainConfig:
     run_name: str = "debug"
     log_root: Path = Path("logs")
+    ckpt_root: Path | None = None  # separate checkpoints from logs (storage contract); None -> log_root
     seed: int = 0
     device: str = "cuda:0"
     data: DataCfg = field(default_factory=DataCfg)

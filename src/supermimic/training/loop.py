@@ -42,6 +42,8 @@ class Trainer:
         self.device = cfg.device
         self.log_dir = Path(cfg.log_root) / cfg.run_name
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.ckpt_dir = (Path(cfg.ckpt_root) if cfg.ckpt_root else Path(cfg.log_root)) / cfg.run_name
+        self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         if self.is_main:
             (self.log_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=2, default=str))
         self.writer = SummaryWriter(str(self.log_dir / "tb")) if self.is_main else None
@@ -122,7 +124,7 @@ class Trainer:
                 "bin_memory": self.command.bin_memory,
                 "config": asdict(self.cfg),
             },
-            self.log_dir / name,
+            self.ckpt_dir / name,
         )
 
     def load(self, path: Path) -> None:
