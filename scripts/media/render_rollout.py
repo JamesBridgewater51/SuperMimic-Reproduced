@@ -32,6 +32,7 @@ def two_robot_xml(mjcf: Path, root_body: str) -> str:
     # keep only the visual mesh geoms of the ghost, visual-only and translucent
     ghost = re.sub(r"<geom\b[^>]*/>", lambda m: "" if "mesh=" not in m.group(0) else m.group(0), ghost)
     ghost = re.sub(r' (contype|conaffinity|group|material|rgba|class)="[^"]*"', "", ghost)
+    ghost = ghost.replace('type="mesh" ', "")  # injected below; avoid duplicate attributes
     ghost = ghost.replace("<geom ", f'<geom type="mesh" contype="0" conaffinity="0" group="1" rgba="{GHOST_RGBA}" ')
     ghost = re.sub(r"<site[^>]*/>", "", ghost)
     ghost = re.sub(r"<freejoint[^>]*/>", '<freejoint name="ref_root"/>', ghost, count=1)
