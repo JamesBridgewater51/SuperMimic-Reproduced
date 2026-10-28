@@ -127,7 +127,7 @@ class ReplayBuffer:
         offs = torch.arange(k + 1, device=self.device)
         tt = (t[None, :] + offs[:, None]) % self.T  # (k+1, n)
         ee = e[None, :].expand(k + 1, n)
-        return WindowBatch(
+        wb = WindowBatch(
             states=self.s[ee, tt],
             a_exec=self.a_exec[ee[:-1], tt[:-1]],
             a_clean=self.a[ee[:-1], tt[:-1]],
@@ -136,6 +136,19 @@ class ReplayBuffer:
             done=self.done[ee[1:], tt[1:]],
             frame=self.frame[ee[:-1], tt[:-1]],
         )
+        # NaN guard: simulation blowups can log non-finite states; drop those
+        # windows at the source so a single bad row cannot poison a WM update.
+        ok = torch.isfinite(wb.states).all(dim=-1).all(dim=0) & torch.isfinite(wb.a_exec).all(dim=-1).all(dim=0)
+        if not bool(ok.all()):
+            if not bool(ok.any()):
+                return wb  # empty handled by callers
+            idx = ok.nonzero(as_tuple=True)[0]
+            gather = lambda t: t[..., idx]  # noqa: E717
+            wb = WindowBatch(
+                states=gather(wb.states), a_exec=gather(wb.a_exec), a_clean=gather(wb.a_clean),
+                xi=wb.xi[idx], reward=gather(wb.reward), done=gather(wb.done), frame=gather(wb.frame),
+            )
+        return wb
 
     @torch.no_grad()
     def sample_starts(self, n: int, hist: int) -> StartBatch:

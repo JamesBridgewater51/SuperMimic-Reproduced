@@ -53,6 +53,8 @@ class WorldModelTrainer:
         agg: dict[str, torch.Tensor] = {}
         for _ in range(self.cfg.batches_per_update):
             w = buffer.sample_windows(self.cfg.batch_size, self.cfg.window)
+            if w.states.shape[-1] == 0:
+                continue  # fully non-finite batch (transient sim blowup) — skip
             loss, m = self.loss_on(w)
             self.opt.zero_grad(set_to_none=True)
             loss.backward()
