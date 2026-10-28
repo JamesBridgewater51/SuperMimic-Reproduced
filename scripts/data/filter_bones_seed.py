@@ -127,7 +127,16 @@ def _foot_sole_height(npz_path: str, gate: np.ndarray) -> np.ndarray:
         if gt == mujoco.mjtGeom.mjGEOM_BOX:
             sx, sy, sz = m.geom_size[g]
             R = d.geom_xmat[g].reshape(3, 3)
-            return cz - (abs(R[0, 2]) * sx + abs(R[1, 2]) * sy + abs(R[2, 2]) * sz)
+            # World-z support of a box: geom_xmat is local->world, so the corner
+            # depths along world z come from the THIRD ROW (not column):
+            # min_z = cz - (|R20|sx + |R21|sy + |R22|sz). Verified against exact
+            # 8-corner enumeration at Euler(20,35,40) deg: zero error (the earlier
+            # third-COLUMN form was off by ~9.5 mm for the X2 sole boxes).
+            # NOTE (provenance): the x2_bones_full_4gpu training run used the
+            # earlier column form via the compact library built 2026-10-28 01:49;
+            # the run was deliberately NOT rebuilt. Impact bound: the floating-feet
+            # gate only (20 rejected clips; unknown number of near-threshold flips).
+            return cz - (abs(R[2, 0]) * sx + abs(R[2, 1]) * sy + abs(R[2, 2]) * sz)
         if gt == mujoco.mjtGeom.mjGEOM_MESH:
             did = m.geom_dataid[g]
             vadr, vnum = m.mesh_vertadr[did], m.mesh_vertnum[did]
