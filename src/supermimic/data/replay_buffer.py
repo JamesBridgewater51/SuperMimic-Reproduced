@@ -136,9 +136,14 @@ class ReplayBuffer:
             done=self.done[ee[1:], tt[1:]],
             frame=self.frame[ee[:-1], tt[:-1]],
         )
-        # NaN guard: simulation blowups can log non-finite states; drop those
-        # windows at the source so a single bad row cannot poison a WM update.
+        # NaN/magnitude guard: simulation blowups log non-finite OR astronomically
+        # large (finite!) states (observed train_ret ~ -1.6e10 before the third
+        # divergence); finiteness alone is not enough. Reject windows whose states,
+        # actions or rewards leave the physically plausible envelope.
         ok = torch.isfinite(wb.states).all(dim=-1).all(dim=0) & torch.isfinite(wb.a_exec).all(dim=-1).all(dim=0)
+        ok &= wb.states.abs().amax(dim=(0, 2)) < 1.0e3
+        ok &= wb.a_exec.abs().amax(dim=(0, 2)) < 1.0e3
+        ok &= wb.reward.abs().amax(dim=0) < 1.0e3
         if not bool(ok.all()):
             if not bool(ok.any()):
                 return wb  # empty handled by callers
