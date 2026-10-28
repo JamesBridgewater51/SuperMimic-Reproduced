@@ -147,11 +147,15 @@ class ReplayBuffer:
         if not bool(ok.all()):
             if not bool(ok.any()):
                 return wb  # empty handled by callers
-            idx = ok.nonzero(as_tuple=True)[0]
-            gather = lambda t: t[..., idx]  # noqa: E717
+            idx = ok.nonzero(as_tuple=True)[0]  # window indices, dim=1 for (k, n, .) tensors
             wb = WindowBatch(
-                states=gather(wb.states), a_exec=gather(wb.a_exec), a_clean=gather(wb.a_clean),
-                xi=wb.xi[idx], reward=gather(wb.reward), done=gather(wb.done), frame=gather(wb.frame),
+                states=wb.states[:, idx],       # (k+1, m, D)
+                a_exec=wb.a_exec[:, idx],       # (k, m, D)
+                a_clean=wb.a_clean[:, idx],     # (k, m, D)
+                xi=wb.xi[idx],                  # (m, xi)
+                reward=wb.reward[:, idx],       # (k, m)
+                done=wb.done[:, idx],           # (k, m)
+                frame=wb.frame[:, idx],         # (k, m)
             )
         return wb
 
