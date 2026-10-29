@@ -220,6 +220,24 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
     data.qpos[2] -= _lowest(model, data)
     mujoco.mj_forward(model, data)
 
+    # Exclude self-collision between kinematically adjacent links: their mesh
+    # convex hulls overlap at design poses (verified: 12 deep penetrations at
+    # the neutral keyframe, e.g. wrist_yaw<->wrist_roll at -2.9 cm), injecting
+    # permanent expulsion forces. G1's primitive collisions avoid this by
+    # geometry; the faithful X2 equivalent is explicit adjacency excludes.
+    parents = {c: j.find("parent").get("link") for j in root.findall("joint") if j.get("type") == "revolute"}
+    mesh_links = {l.get("name") for l in root.findall("link") if l.find("collision") is not None}
+    excluded = set()
+    for child, parent in parents.items():
+        if child in mesh_links and parent in mesh_links:
+            spec.add_exclude(bodyname1=parent, bodyname2=child)
+            excluded.add((parent, child))
+        gp = parents.get(parent)
+        if gp and child in mesh_links and gp in mesh_links:
+            spec.add_exclude(bodyname1=gp, bodyname2=child)
+            excluded.add((gp, child))
+    print(f"[build] excluded {len(excluded)} adjacent self-collision pairs")
+
     key = spec.add_key(name="home")
     key.qpos = data.qpos.tolist()
     print(f"[build] nq={model.nq} nv={model.nv} standing pelvis z={data.qpos[2]:.4f}")
