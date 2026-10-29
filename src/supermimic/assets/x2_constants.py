@@ -1,6 +1,6 @@
 """AgiBot X2-Ultra constants (mirrors mjlab's g1_constants structure).
 
-Assumptions (recorded deviations from an official X2 model, which does not exist):
+Assumptions beyond the supplied X2 URDF (no calibrated actuator model supplied):
   * rotor inertia / gear trains are unknown for X2; reflected-inertia (armature)
     values reuse the G1 motor classes by joint role, so stiffness/damping follow
     the same 10 Hz / damping-ratio-2 design rule as G1;
@@ -8,13 +8,14 @@ Assumptions (recorded deviations from an official X2 model, which does not exist
   * collision: full-collision set with feet (sole boxes) at condim 3.
 """
 from pathlib import Path
+from xml.etree import ElementTree
 
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.actuator import reflected_inertia_from_two_stage_planetary
 from mjlab.utils.spec_config import CollisionCfg
 
-X2_XML: Path = Path(__file__).parents[3] / "assets" / "x2" / "agibot_x2ultra.xml"
+X2_XML: Path = Path(__file__).parents[3] / "assets" / "x2" / "agibot_x2ultra_physics_corrected.xml"
 
 NATURAL_FREQ = 10 * 2.0 * 3.1415926535  # 10 Hz, same design rule as G1
 DAMPING_RATIO = 2.0
@@ -57,14 +58,22 @@ X2_ACTUATORS = (
     _act((".*_wrist_pitch_joint", ".*_wrist_roll_joint"), _ARM_4010, 6.0, 15.71),
 )
 
+def _home_root_position() -> tuple[float, float, float]:
+    """Keep the initial height bound to the generated contact-geometry keyframe."""
+    key = ElementTree.parse(X2_XML).getroot().find("./keyframe/key[@name='home']")
+    if key is None or key.get("qpos") is None:
+        raise ValueError(f"Missing generated home qpos: {X2_XML}")
+    return tuple(float(value) for value in key.get("qpos").split()[:3])
+
+
 HOME_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0.0, 0.0, 0.7016),
+    pos=_home_root_position(),
     joint_pos={
         ".*_hip_pitch_joint": -0.1,
         ".*_knee_joint": 0.3,
         ".*_ankle_pitch_joint": -0.2,
         ".*_shoulder_pitch_joint": 0.2,
-        ".*_elbow_joint": 0.6,
+        ".*_elbow_joint": -0.6,
         "left_shoulder_roll_joint": 0.2,
         "right_shoulder_roll_joint": -0.2,
     },
@@ -89,7 +98,12 @@ X2_ARTICULATION = EntityArticulationInfoCfg(
 def get_spec():
     import mujoco
 
-    return mujoco.MjSpec.from_file(str(X2_XML))
+    spec = mujoco.MjSpec.from_file(str(X2_XML))
+    # EntityCfg supplies init_state; do not attach a second home/reserved key.
+    for key in list(spec.keys):
+        spec.delete(key)
+    spec.nkey = 0
+    return spec
 
 
 def get_x2_robot_cfg() -> EntityCfg:

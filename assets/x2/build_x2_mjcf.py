@@ -39,6 +39,9 @@ X2_JOINT_NAMES: tuple[str, ...] = (
     "right_elbow_joint", "right_wrist_yaw_joint", "right_wrist_pitch_joint", "right_wrist_roll_joint",
 )
 _ROOT = "pelvis"
+# Contact plate approximation, not a manufacturer-calibrated sole model.
+SOLE_CONTACT_BAND_M = 0.012
+SOLE_THICKNESS_M = 0.012
 # default pose: slight knee bend + ankle compensation, arms at sides (G1-like)
 HOME_QPOS: dict[str, float] = {
     ".*_hip_pitch_joint": -0.1,
@@ -47,7 +50,7 @@ HOME_QPOS: dict[str, float] = {
     ".*_shoulder_pitch_joint": 0.2,
     "left_shoulder_roll_joint": 0.2,
     "right_shoulder_roll_joint": -0.2,
-    ".*_elbow_joint": 0.6,
+    ".*_elbow_joint": -0.6,
 }
 
 
@@ -64,6 +67,50 @@ def origin_of(el) -> tuple[np.ndarray, tuple[float, float, float, float]]:
     return xyz, rpy_to_quat_wxyz(rpy)
 
 
+def mesh_vertices_in_body(mj_model, mj_data, geom_id: int) -> np.ndarray:
+    """Undo compiled mesh centering/orientation before using body-local dimensions."""
+    mesh_id = mj_model.geom_dataid[geom_id]
+    start, count = mj_model.mesh_vertadr[mesh_id], mj_model.mesh_vertnum[mesh_id]
+    vertices = mj_model.mesh_vert[start:start + count].astype(np.float64)
+    body_id = mj_model.geom_bodyid[geom_id]
+    world = vertices @ mj_data.geom_xmat[geom_id].reshape(3, 3).T + mj_data.geom_xpos[geom_id]
+    return (world - mj_data.xpos[body_id]) @ mj_data.xmat[body_id].reshape(3, 3)
+
+
+def sole_plate_parameters(vertices: np.ndarray) -> tuple[list[float], list[float]]:
+    """Fit a 12 mm plate to the lowest 12 mm support band, preserving its bottom."""
+    bottom = float(vertices[:, 2].min())
+    support = vertices[vertices[:, 2] <= bottom + SOLE_CONTACT_BAND_M]
+    lower, upper = support[:, :2].min(axis=0), support[:, :2].max(axis=0)
+    half_xy, center_xy = (upper - lower) / 2, (upper + lower) / 2
+    if len(support) < 3 or np.any(half_xy <= 0):
+        raise ValueError("Foot visual mesh has no nondegenerate plantar support band")
+    size = [float(half_xy[0]), float(half_xy[1]), SOLE_THICKNESS_M / 2]
+    position = [float(center_xy[0]), float(center_xy[1]), bottom + SOLE_THICKNESS_M / 2]
+    return size, position
+
+
+def validate_joint_ranges(mj_model, source_joints) -> None:
+    """A radian XML header cannot reveal an earlier MjSpec degree conversion."""
+    for joint in source_joints:
+        if joint.get("type") != "revolute":
+            continue
+        joint_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint.get("name"))
+        limit = joint.find("limit")
+        expected = [float(limit.get("lower")), float(limit.get("upper"))]
+        if not np.allclose(mj_model.jnt_range[joint_id], expected, atol=1e-10, rtol=0):
+            raise ValueError(f"URDF radian range changed during compile: {joint.get('name')}")
+
+
+def validate_home_qpos(mj_model, qpos: np.ndarray) -> None:
+    for joint_id in range(1, mj_model.njnt):
+        coordinate = qpos[mj_model.jnt_qposadr[joint_id]]
+        lower, upper = mj_model.jnt_range[joint_id]
+        if not lower <= coordinate <= upper:
+            name = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_JOINT, joint_id)
+            raise ValueError(f"Home pose outside joint limits: {name}: {coordinate}")
+
+
 def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
     tree = ET.parse(urdf_path)
     root = tree.getroot()
@@ -71,13 +118,13 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
     joints = root.findall("joint")
 
     child_of = {}   # parent link -> (joint, child link)
-    j_of_child = {}  # child link -> joint
     for j in joints:
         p, c = j.find("parent").get("link"), j.find("child").get("link")
         child_of.setdefault(p, []).append((j, c))
-        j_of_child[c] = j
 
     spec = mujoco.MjSpec()
+    # MjSpec defaults to degree-valued angle fields; URDF limits are radians.
+    spec.compiler.degree = False
     spec.compiler.meshdir = meshdir
     spec.compiler.autolimits = True
 
@@ -163,8 +210,10 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
     model = spec.compile()
     names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) for i in range(1, model.njnt)]
     assert tuple(names) == X2_JOINT_NAMES, f"joint order mismatch: {names}"
+    validate_joint_ranges(model, joints)
 
     qpos = np.zeros(model.nq)
+    qpos[3] = 1.0
     import re
     for jid in range(1, model.njnt):
         nm = names[jid - 1]
@@ -172,13 +221,16 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
             if re.fullmatch(pat, nm):
                 qpos[model.jnt_qposadr[jid]] = val
                 break
+    validate_home_qpos(model, qpos)
+
     def _lowest(model, data) -> float:
         best = np.inf
         for g in range(model.ngeom):
             if not (model.geom_contype[g] or model.geom_conaffinity[g]):
                 continue
             if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX:
-                best = min(best, float(data.geom_xpos[g][2] - model.geom_size[g][2]))
+                vertical_extent = np.abs(data.geom_xmat[g].reshape(3, 3)[2]) @ model.geom_size[g]
+                best = min(best, float(data.geom_xpos[g][2] - vertical_extent))
             elif model.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH:
                 did = model.geom_dataid[g]
                 vadr, vnum = model.mesh_vertadr[did], model.mesh_vertnum[did]
@@ -198,20 +250,14 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
         gid_vis = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, f"{side}_ankle_roll_link_visual")
         if gid_vis < 0:
             continue
-        did = model.geom_dataid[gid_vis]
-        vadr, vnum = model.mesh_vertadr[did], model.mesh_vertnum[did]
-        v = model.mesh_vert[vadr:vadr + vnum].astype(np.float64)
-        dx = (v[:, 0].max() - v[:, 0].min()) / 2; dy = (v[:, 1].max() - v[:, 1].min()) / 2
-        zmin = v[:, 2].min(); zmax = v[:, 2].max()
-        cx = (v[:, 0].max() + v[:, 0].min()) / 2; cy = (v[:, 1].max() + v[:, 1].min()) / 2
-        thick = max(0.012, (zmax - zmin) * 0.25)
-        # spec objects are pre-compile references: find the geom spec by name
+        vertices = mesh_vertices_in_body(model, data, gid_vis)
+        size, position = sole_plate_parameters(vertices)
         for body_spec in spec.bodies:
             for gs in body_spec.geoms:
                 if gs.name == f"{side}_ankle_roll_link_sole_collision":
-                    gs.size = [float(dx), float(dy), float(thick / 2)]
-                    gs.pos = [float(cx), float(cy), float(zmin + thick / 2)]
-        print(f"[fit] {side} sole: dx={dx:.3f} dy={dy:.3f} zmin={zmin:.3f} cx={cx:.3f} cy={cy:.3f}")
+                    gs.size = size
+                    gs.pos = position
+        print(f"[fit] {side} body-frame sole: size={size} pos={position}")
     model = spec.compile()
     data = mujoco.MjData(model)
     data.qpos[:] = qpos
@@ -220,11 +266,9 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
     data.qpos[2] -= _lowest(model, data)
     mujoco.mj_forward(model, data)
 
-    # Exclude self-collision between kinematically adjacent links: their mesh
-    # convex hulls overlap at design poses (verified: 12 deep penetrations at
-    # the neutral keyframe, e.g. wrist_yaw<->wrist_roll at -2.9 cm), injecting
-    # permanent expulsion forces. G1's primitive collisions avoid this by
-    # geometry; the faithful X2 equivalent is explicit adjacency excludes.
+    # Preserve the structural-neighbor policy for overlapping motor housings.
+    # Direct-parent excludes are redundant with default filterparent; the
+    # grandparent assemblies are not. This is not a vendor-validated SRDF matrix.
     parents = {j.find("child").get("link"): j.find("parent").get("link") for j in root.findall("joint") if j.get("type") == "revolute"}
     mesh_links = {l.get("name") for l in root.findall("link") if l.find("collision") is not None}
     excluded = set()

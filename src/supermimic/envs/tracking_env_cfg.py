@@ -36,6 +36,10 @@ from supermimic.envs.actions import NoisyJointPositionActionCfg
 from supermimic.envs.mdp import observations as sm_obs
 from supermimic.envs.mdp import terminations as sm_term
 from supermimic.envs.mdp.commands import MultiClipMotionCommandCfg
+from supermimic.envs.warp_safety import (
+    OverflowCheckedRlEnv, OverflowVisibleSimulationCfg, X2_NJMAX, X2_NCONMAX,
+    X2_SINGLE_WORLD_NCONMAX, validate_x2_constraint_capacity,
+)
 
 class QuietSimulationCfg(SimulationCfg):
     """SimulationCfg that disables MuJoCo Warp's per-step overflow printf (a kernel build-time constant,
@@ -91,6 +95,17 @@ class SuperMimicEnvCfgArgs:
     robot: str = "g1"  # robot registry key: "g1" | "x2"
     debug_vis: bool = False  # draw the reference ghost in the viewer (scripts/play.py)
     extra_command_kwargs: dict = field(default_factory=dict)
+
+
+def _simulation_cfg(env_args: SuperMimicEnvCfgArgs) -> SimulationCfg:
+    options = MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20)
+    if not env_args.robot.startswith("x2"):
+        return QuietSimulationCfg(nconmax=35, njmax=250, mujoco=options)
+    validate_x2_constraint_capacity(X2_NJMAX)
+    options.tolerance = 1e-6  # Match Warp's supported minimum on CPU too.
+    # A shared pool with one world must accommodate the measured 69-contact case.
+    contacts = X2_SINGLE_WORLD_NCONMAX if env_args.num_envs == 1 else X2_NCONMAX
+    return OverflowVisibleSimulationCfg(nconmax=contacts, njmax=X2_NJMAX, mujoco=options)
 
 
 def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
@@ -239,7 +254,7 @@ def make_env_cfg(a: SuperMimicEnvCfgArgs) -> ManagerBasedRlEnvCfg:
         terminations=terminations,
         recorders=recorders,
         viewer=ViewerConfig(origin_type=ViewerConfig.OriginType.ASSET_BODY, entity_name="robot", body_name="torso_link", distance=2.8, fovy=55.0, elevation=-5.0, azimuth=120.0),
-        sim=QuietSimulationCfg(nconmax=35, njmax=250, mujoco=MujocoCfg(timestep=0.005, iterations=10, ls_iterations=20)),
+        sim=_simulation_cfg(a),
         decimation=4,
         episode_length_s=a.episode_length_s,
         seed=a.seed,
@@ -251,4 +266,10 @@ def make_env(a: SuperMimicEnvCfgArgs, device: str = "cuda:0") -> ManagerBasedRlE
     from mjlab.utils.torch import configure_torch_backends
 
     configure_torch_backends()
-    return ManagerBasedRlEnv(make_env_cfg(a), device=device)
+    cfg = make_env_cfg(a)
+    if not a.robot.startswith("x2"):
+        return ManagerBasedRlEnv(cfg, device=device)
+    validate_x2_constraint_capacity(cfg.sim.njmax)
+    env = OverflowCheckedRlEnv(cfg, device=device)
+    env.assert_physics_buffers()
+    return env
