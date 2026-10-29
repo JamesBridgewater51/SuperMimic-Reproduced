@@ -137,9 +137,15 @@ class Trainer:
         self.wm.load_state_dict(ck["wm"])
         self.policy.load_state_dict(ck["policy"])
         self.critic.load_state_dict(ck["critic"])
-        self.wm_trainer.opt.load_state_dict(ck["wm_opt"])
-        self.policy_trainer.opt.load_state_dict(ck["policy_opt"])
-        self.policy_trainer.critic_opt.load_state_dict(ck["critic_opt"])
+        # Sanitized checkpoints (fresh-optimizer resumes) omit the *_opt keys on
+        # purpose: a checkpoint whose Adam moments were poisoned by non-finite or
+        # garbage minibatches must not restore them.
+        if "wm_opt" in ck:
+            self.wm_trainer.opt.load_state_dict(ck["wm_opt"])
+            self.policy_trainer.opt.load_state_dict(ck["policy_opt"])
+            self.policy_trainer.critic_opt.load_state_dict(ck["critic_opt"])
+        else:
+            print("[INFO] fresh-optimizer resume (optimizer state dropped from checkpoint)")
         self.command.bin_return.copy_(ck["bin_return"])
         self.command.bin_memory.copy_(ck["bin_memory"])
         self.iteration = ck["iteration"]
