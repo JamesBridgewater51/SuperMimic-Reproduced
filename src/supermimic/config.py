@@ -45,6 +45,10 @@ class ScheduleCfg:
     warmup_iterations: int = 40  # env steps before the first update (fills k-step windows)
     lr_final_ratio: float = 0.03
     lr_decay_fraction: float = 250_000 / 320_000
+    lr_horizon: int | None = None  # separate decay horizon; None -> total_iterations.
+    # Set lr_horizon explicitly on continuation legs (e.g. ceil(N / lr_decay_fraction))
+    # so resuming at iteration N does not rebound the LR, and use a very large
+    # total_iterations for an effectively unbounded loop cap.
     log_interval: int = 50  # iterations
     checkpoint_interval: int = 4000  # iterations
     max_hours: float | None = None
