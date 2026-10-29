@@ -146,8 +146,14 @@ class Trainer:
             self.policy_trainer.critic_opt.load_state_dict(ck["critic_opt"])
         else:
             print("[INFO] fresh-optimizer resume (optimizer state dropped from checkpoint)")
-        self.command.bin_return.copy_(ck["bin_return"])
-        self.command.bin_memory.copy_(ck["bin_memory"])
+        # Sampler statistics are library-shaped; a resume onto a different
+        # library (e.g. the velocity-cleaned v2) resets the curriculum instead
+        # of crashing on a size mismatch.
+        if "bin_return" in ck and ck["bin_return"].shape == self.command.bin_return.shape:
+            self.command.bin_return.copy_(ck["bin_return"])
+            self.command.bin_memory.copy_(ck["bin_memory"])
+        else:
+            print("[INFO] library changed since checkpoint: sampler statistics reset")
         self.iteration = ck["iteration"]
         self.start_iteration = self.iteration
         self.num_updates = ck["num_updates"]
