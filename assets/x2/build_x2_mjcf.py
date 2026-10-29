@@ -225,7 +225,7 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
     # the neutral keyframe, e.g. wrist_yaw<->wrist_roll at -2.9 cm), injecting
     # permanent expulsion forces. G1's primitive collisions avoid this by
     # geometry; the faithful X2 equivalent is explicit adjacency excludes.
-    parents = {c: j.find("parent").get("link") for j in root.findall("joint") if j.get("type") == "revolute"}
+    parents = {j.find("child").get("link"): j.find("parent").get("link") for j in root.findall("joint") if j.get("type") == "revolute"}
     mesh_links = {l.get("name") for l in root.findall("link") if l.find("collision") is not None}
     excluded = set()
     for child, parent in parents.items():
