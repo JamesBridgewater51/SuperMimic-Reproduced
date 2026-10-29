@@ -57,7 +57,10 @@ class Trainer:
             files = [cfg.data.library]
             cfg.env.compact_library = True
         else:
-            files = discover_npz(cfg.data.npz_dir, limit=cfg.data.limit, names=cfg.data.clips, manifest=cfg.data.manifest)
+            clips = cfg.data.clips
+            if cfg.data.clips_file is not None:
+                clips = [l.strip() for l in open(cfg.data.clips_file) if l.strip()]
+            files = discover_npz(cfg.data.npz_dir, limit=cfg.data.limit, names=clips, manifest=cfg.data.manifest)
         if not files:
             raise FileNotFoundError(f"no clips under {cfg.data.npz_dir}")
         self.env = make_env(
