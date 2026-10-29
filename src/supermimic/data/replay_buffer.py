@@ -166,6 +166,25 @@ class ReplayBuffer:
         dist_to_ptr = (self.ptr[:, None] - t_idx - 1) % self.T
         mask &= dist_to_ptr < self.T - hist - 1  # keep history rows from being overwritten underneath
         e, t = self._sample_from_mask(mask, n)
+        # NaN/magnitude guard for imagination seeds (same envelope as windows):
+        # explosive-but-finite sim states starve the policy of clean starts.
+        ok = torch.isfinite(self.s[e, t]).all(dim=-1) & (self.s[e, t].abs().amax(dim=-1) < 1.0e3)
+        if not bool(ok.all()):
+            # resample once from healthy rows only; fall back to global valid rows
+            for _ in range(2):
+                if bool(ok.any()):
+                    e, t = e[ok], t[ok]
+                    if e.numel() >= n:
+                        break
+                e2, t2 = self._sample_from_mask(mask, max(n, 64))
+                ok2 = torch.isfinite(self.s[e2, t2]).all(dim=-1) & (self.s[e2, t2].abs().amax(dim=-1) < 1.0e3)
+                e2, t2 = e2[ok2], t2[ok2]
+                if e2.numel() > 0:
+                    e = torch.cat([e, e2])[:n] if e.numel() < n else e[:n]
+                    t = torch.cat([t, t2])[:n] if t.numel() < n else t[:n]
+                    if e.numel() == n:
+                        break
+            e, t = e[:n], t[:n]
         offs = torch.arange(hist, device=self.device) - (hist - 1)  # -(hist-1) .. 0
         tt = (t[None, :] + offs[:, None]) % self.T  # (hist, n)
         ee = e[None, :].expand(hist, n)
