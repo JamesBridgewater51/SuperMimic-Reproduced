@@ -11,7 +11,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from supermimic.config import TrainConfig
-from supermimic.data.motion_convert import load_g1_model
+from supermimic.robots import load_robot_model
 from supermimic.envs import SuperMimicEnvCfgArgs, make_env
 from supermimic.envs.mdp.motion_library import discover_npz
 from supermimic.envs.tracking_env_cfg import ANCHOR_BODY, ROOT_BODY, TRACKED_BODIES
@@ -28,7 +28,12 @@ from supermimic.world_model.world_model import WorldModel
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
-        cfg.policy.goal_dim = cfg.env.future_frames * 68 + (9 if cfg.env.anchor_obs else 0)
+        from supermimic.robots import get_robot
+
+        _n = len(get_robot(cfg.env.robot).joint_names)
+        cfg.policy.num_joints = _n
+        cfg.world_model.state_spec.num_joints = _n
+        cfg.policy.goal_dim = cfg.env.future_frames * (2 * _n + 10) + (9 if cfg.env.anchor_obs else 0)
         cfg.policy_trainer.anchor_obs = cfg.env.anchor_obs
         self.rank, local_rank, self.world = init_distributed()
         self.is_main = self.rank == 0
@@ -42,6 +47,8 @@ class Trainer:
         self.device = cfg.device
         self.log_dir = Path(cfg.log_root) / cfg.run_name
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.ckpt_dir = (Path(cfg.ckpt_root) if cfg.ckpt_root else Path(cfg.log_root)) / cfg.run_name
+        self.ckpt_dir.mkdir(parents=True, exist_ok=True)
         if self.is_main:
             (self.log_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=2, default=str))
         self.writer = SummaryWriter(str(self.log_dir / "tb")) if self.is_main else None
@@ -50,7 +57,10 @@ class Trainer:
             files = [cfg.data.library]
             cfg.env.compact_library = True
         else:
-            files = discover_npz(cfg.data.npz_dir, limit=cfg.data.limit, names=cfg.data.clips, manifest=cfg.data.manifest)
+            clips = cfg.data.clips
+            if cfg.data.clips_file is not None:
+                clips = [l.strip() for l in open(cfg.data.clips_file) if l.strip()]
+            files = discover_npz(cfg.data.npz_dir, limit=cfg.data.limit, names=clips, manifest=cfg.data.manifest)
         if not files:
             raise FileNotFoundError(f"no clips under {cfg.data.npz_dir}")
         self.env = make_env(
@@ -67,6 +77,7 @@ class Trainer:
                 replay_capacity=cfg.env.replay_capacity,
                 compact_library=cfg.env.compact_library,
                 anchor_obs=cfg.env.anchor_obs,
+                robot=cfg.env.robot,
                 seed=cfg.seed + 1000 * self.rank,
             ),
             device=self.device,
@@ -78,7 +89,7 @@ class Trainer:
         self.buffer = self.recorder.buffer
         robot = env.scene["robot"]
 
-        fk = G1Kinematics(load_g1_model(), device=self.device)
+        fk = G1Kinematics(load_robot_model(cfg.env.robot), device=self.device)
         heads = AnalyticHeads(fk, TRACKED_BODIES, ANCHOR_BODY, ROOT_BODY, robot.data.soft_joint_pos_limits[0].clone(), robot.data.default_joint_pos[0].clone())
         self.wm = WorldModel(cfg.world_model, heads, self.device)
         self.policy = Policy(cfg.policy).to(self.device)
@@ -121,7 +132,7 @@ class Trainer:
                 "bin_memory": self.command.bin_memory,
                 "config": asdict(self.cfg),
             },
-            self.log_dir / name,
+            self.ckpt_dir / name,
         )
 
     def load(self, path: Path) -> None:
@@ -129,11 +140,23 @@ class Trainer:
         self.wm.load_state_dict(ck["wm"])
         self.policy.load_state_dict(ck["policy"])
         self.critic.load_state_dict(ck["critic"])
-        self.wm_trainer.opt.load_state_dict(ck["wm_opt"])
-        self.policy_trainer.opt.load_state_dict(ck["policy_opt"])
-        self.policy_trainer.critic_opt.load_state_dict(ck["critic_opt"])
-        self.command.bin_return.copy_(ck["bin_return"])
-        self.command.bin_memory.copy_(ck["bin_memory"])
+        # Sanitized checkpoints (fresh-optimizer resumes) omit the *_opt keys on
+        # purpose: a checkpoint whose Adam moments were poisoned by non-finite or
+        # garbage minibatches must not restore them.
+        if "wm_opt" in ck:
+            self.wm_trainer.opt.load_state_dict(ck["wm_opt"])
+            self.policy_trainer.opt.load_state_dict(ck["policy_opt"])
+            self.policy_trainer.critic_opt.load_state_dict(ck["critic_opt"])
+        else:
+            print("[INFO] fresh-optimizer resume (optimizer state dropped from checkpoint)")
+        # Sampler statistics are library-shaped; a resume onto a different
+        # library (e.g. the velocity-cleaned v2) resets the curriculum instead
+        # of crashing on a size mismatch.
+        if "bin_return" in ck and ck["bin_return"].shape == self.command.bin_return.shape:
+            self.command.bin_return.copy_(ck["bin_return"])
+            self.command.bin_memory.copy_(ck["bin_memory"])
+        else:
+            print("[INFO] library changed since checkpoint: sampler statistics reset")
         self.iteration = ck["iteration"]
         self.start_iteration = self.iteration
         self.num_updates = ck["num_updates"]

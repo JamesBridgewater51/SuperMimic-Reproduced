@@ -19,8 +19,8 @@ import torch
 from mjlab.managers.recorder_manager import RecorderTerm, RecorderTermCfg
 
 from supermimic.data.replay_buffer import ReplayBuffer
-from supermimic.envs.sim_context import XI_DIM, SimContext
-from supermimic.envs.state_io import STATE_DIM, StateIO
+from supermimic.envs.sim_context import SimContext
+from supermimic.envs.state_io import StateIO
 
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
@@ -35,9 +35,12 @@ class ReplayRecorder(RecorderTerm):
         self.command_name = p.get("command_name", "motion")
         self.action_name = p.get("action_name", "joint_pos")
         n = env.num_envs
-        self.buffer = ReplayBuffer(n, int(p["capacity"]), STATE_DIM, 29, XI_DIM, env.device)
-        self.prev_s = torch.zeros(n, STATE_DIM, device=env.device)
-        self.prev_xi = torch.zeros(n, XI_DIM, device=env.device)
+        state_dim = self.state_io.nq + self.state_io.nv
+        act_dim = len(env.scene["robot"].joint_names)
+        xi_dim = 4 + act_dim  # friction 1 + encoder bias nj + com 3
+        self.buffer = ReplayBuffer(n, int(p["capacity"]), state_dim, act_dim, xi_dim, env.device)
+        self.prev_s = torch.zeros(n, state_dim, device=env.device)
+        self.prev_xi = torch.zeros(n, xi_dim, device=env.device)
         self.prev_frame = torch.zeros(n, dtype=torch.long, device=env.device)
         self.prev_clip = torch.zeros(n, dtype=torch.long, device=env.device)
         self.ep_start = torch.ones(n, dtype=torch.bool, device=env.device)
@@ -91,7 +94,7 @@ class ReplayRecorder(RecorderTerm):
         # Terminal row: the state reached by the last action (no transition out of it).
         cmd = self.command
         s_next = self.state_io.read()[env_ids]
-        zeros_a = torch.zeros(env_ids.numel(), 29, device=env.device)
+        zeros_a = torch.zeros(env_ids.numel(), self.buffer.act_dim, device=env.device)
         self.buffer.add(
             env_ids,
             s=s_next,

@@ -42,7 +42,8 @@ class WorldModel(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.spec = StateSpec(cfg.state_spec, device)
-        self.dynamics = DynamicsMLP(hidden=cfg.hidden)
+        nj = cfg.state_spec.num_joints
+        self.dynamics = DynamicsMLP(feat_dim=13 + 2 * nj, act_dim=nj, xi_dim=4 + nj, hidden=cfg.hidden, out_dim=12 + 2 * nj)
         self.term_head = TerminationHead(cfg.term_hidden, cfg.height_threshold, cfg.tilt_threshold)
         self.heads = heads  # analytic observation / reward / FK (no parameters)
         self.to(device)

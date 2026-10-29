@@ -18,7 +18,7 @@ import numpy as np
 import tyro
 from PIL import Image, ImageDraw, ImageFont
 
-from mjlab.asset_zoo.robots.unitree_g1.g1_constants import G1_XML
+from supermimic.robots import get_robot
 
 GHOST_RGBA = "0.25 0.50 1.0 0.22"
 
@@ -32,6 +32,7 @@ def two_robot_xml(mjcf: Path, root_body: str) -> str:
     # keep only the visual mesh geoms of the ghost, visual-only and translucent
     ghost = re.sub(r"<geom\b[^>]*/>", lambda m: "" if "mesh=" not in m.group(0) else m.group(0), ghost)
     ghost = re.sub(r' (contype|conaffinity|group|material|rgba|class)="[^"]*"', "", ghost)
+    ghost = ghost.replace('type="mesh" ', "")  # injected below; avoid duplicate attributes
     ghost = ghost.replace("<geom ", f'<geom type="mesh" contype="0" conaffinity="0" group="1" rgba="{GHOST_RGBA}" ')
     ghost = re.sub(r"<site[^>]*/>", "", ghost)
     ghost = re.sub(r"<freejoint[^>]*/>", '<freejoint name="ref_root"/>', ghost, count=1)
@@ -76,12 +77,15 @@ def pretty(name: str) -> str:
     return base.replace("_", " ")
 
 
-def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None, width: int = 1280, height: int = 720,
+def main(traj: Path, out_dir: Path, fps: int = 25, seconds: float | None = None, width: int = 1280, height: int = 720, robot: str = "g1",
          azimuth: float = 140.0, elevation: float = -14.0, distance: float = 2.7, ghost: bool = True, label: bool = True, clips: list[str] | None = None,
          concat: Path | None = None, segments: list[str] | None = None, titles: list[str] | None = None) -> None:
     """``segments``: per-clip time windows as ``name:start:end`` (seconds); ``titles``: ``name=Display title`` overrides."""
 
-    model = mujoco.MjModel.from_xml_string(two_robot_xml(Path(G1_XML), "pelvis"))
+    import sys
+
+    xml = Path(get_robot(robot).xml_path())
+    model = mujoco.MjModel.from_xml_string(two_robot_xml(xml, "pelvis"))
     data = mujoco.MjData(model)
     renderer = mujoco.Renderer(model, height, width)
     opt = mujoco.MjvOption()

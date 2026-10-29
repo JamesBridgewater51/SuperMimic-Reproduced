@@ -39,6 +39,7 @@ class StartBatch:
 class ReplayBuffer:
     def __init__(self, num_envs: int, capacity: int, state_dim: int, act_dim: int, xi_dim: int, device):
         self.E, self.T = num_envs, capacity
+        self.act_dim = act_dim
         self.device = torch.device(device)
         E, T = num_envs, capacity
         f = lambda *shape: torch.zeros(E, T, *shape, device=self.device)  # noqa: E731
@@ -126,7 +127,7 @@ class ReplayBuffer:
         offs = torch.arange(k + 1, device=self.device)
         tt = (t[None, :] + offs[:, None]) % self.T  # (k+1, n)
         ee = e[None, :].expand(k + 1, n)
-        return WindowBatch(
+        wb = WindowBatch(
             states=self.s[ee, tt],
             a_exec=self.a_exec[ee[:-1], tt[:-1]],
             a_clean=self.a[ee[:-1], tt[:-1]],
@@ -135,6 +136,28 @@ class ReplayBuffer:
             done=self.done[ee[1:], tt[1:]],
             frame=self.frame[ee[:-1], tt[:-1]],
         )
+        # NaN/magnitude guard: simulation blowups log non-finite OR astronomically
+        # large (finite!) states (observed train_ret ~ -1.6e10 before the third
+        # divergence); finiteness alone is not enough. Reject windows whose states,
+        # actions or rewards leave the physically plausible envelope.
+        ok = torch.isfinite(wb.states).all(dim=-1).all(dim=0) & torch.isfinite(wb.a_exec).all(dim=-1).all(dim=0)
+        ok &= wb.states.abs().amax(dim=(0, 2)) < 1.0e3
+        ok &= wb.a_exec.abs().amax(dim=(0, 2)) < 1.0e3
+        ok &= wb.reward.abs().amax(dim=0) < 1.0e3
+        if not bool(ok.all()):
+            idx = ok.nonzero(as_tuple=True)[0]  # window indices, dim=1 for (k, n, .) tensors
+            if idx.numel() == 0:
+                idx = torch.empty(0, dtype=torch.long, device=idx.device)
+            wb = WindowBatch(
+                states=wb.states[:, idx],       # (k+1, m, D)
+                a_exec=wb.a_exec[:, idx],       # (k, m, D)
+                a_clean=wb.a_clean[:, idx],     # (k, m, D)
+                xi=wb.xi[idx],                  # (m, xi)
+                reward=wb.reward[:, idx],       # (k, m)
+                done=wb.done[:, idx],           # (k, m)
+                frame=wb.frame[:, idx],         # (k, m)
+            )
+        return wb
 
     @torch.no_grad()
     def sample_starts(self, n: int, hist: int) -> StartBatch:
@@ -143,6 +166,25 @@ class ReplayBuffer:
         dist_to_ptr = (self.ptr[:, None] - t_idx - 1) % self.T
         mask &= dist_to_ptr < self.T - hist - 1  # keep history rows from being overwritten underneath
         e, t = self._sample_from_mask(mask, n)
+        # NaN/magnitude guard for imagination seeds (same envelope as windows):
+        # explosive-but-finite sim states starve the policy of clean starts.
+        ok = torch.isfinite(self.s[e, t]).all(dim=-1) & (self.s[e, t].abs().amax(dim=-1) < 1.0e3)
+        if not bool(ok.all()):
+            # resample once from healthy rows only; fall back to global valid rows
+            for _ in range(2):
+                if bool(ok.any()):
+                    e, t = e[ok], t[ok]
+                    if e.numel() >= n:
+                        break
+                e2, t2 = self._sample_from_mask(mask, max(n, 64))
+                ok2 = torch.isfinite(self.s[e2, t2]).all(dim=-1) & (self.s[e2, t2].abs().amax(dim=-1) < 1.0e3)
+                e2, t2 = e2[ok2], t2[ok2]
+                if e2.numel() > 0:
+                    e = torch.cat([e, e2])[:n] if e.numel() < n else e[:n]
+                    t = torch.cat([t, t2])[:n] if t.numel() < n else t[:n]
+                    if e.numel() == n:
+                        break
+            e, t = e[:n], t[:n]
         offs = torch.arange(hist, device=self.device) - (hist - 1)  # -(hist-1) .. 0
         tt = (t[None, :] + offs[:, None]) % self.T  # (hist, n)
         ee = e[None, :].expand(hist, n)

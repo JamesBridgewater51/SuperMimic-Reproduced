@@ -39,7 +39,10 @@ PENETRATE_FRAC = 0.80
 FLOAT_Z = 0.02
 FLOAT_S = 0.5
 UPRIGHT_GZ = 0.9
-STAND_Z = (0.60, 0.85)
+STAND_Z = (0.60, 0.85)  # g1 pelvis standing band; x2 overrides below
+ROBOT = "g1"
+X2_STAND_Z = (0.70, 0.97)
+FOOT_RE_X2 = r"^(left|right)_ankle_roll_link_sole_collision$"
 STILL_V = 0.1
 STILL_QD = 0.5
 FPS = 50
@@ -90,17 +93,18 @@ _FOOT_GEOMS = None
 
 
 def _foot_sole_height(npz_path: str, gate: np.ndarray) -> np.ndarray:
-    """Lowest point over both feet's collision capsules, for the gated frames (returns len(gate.sum()),)."""
+    """Lowest point over both feet's collision geoms, for the gated frames (returns len(gate.sum()),)."""
     global _MODEL, _FOOT_GEOMS
     import mujoco
     import re
 
     if _MODEL is None:
-        from supermimic.data.motion_convert import load_g1_model
+        from supermimic.robots import get_robot, load_robot_model
 
-        _MODEL = load_g1_model()
-        _FOOT_GEOMS = [g for g in range(_MODEL.ngeom) if re.match(r"^(left|right)_foot[1-7]_collision$", mujoco.mj_id2name(_MODEL, mujoco.mjtObj.mjOBJ_GEOM, g) or "")]
-        assert len(_FOOT_GEOMS) == 14 and all(_MODEL.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE for g in _FOOT_GEOMS)
+        _MODEL = load_robot_model(ROBOT)
+        foot_re = get_robot(ROBOT).foot_geom_regex
+        _FOOT_GEOMS = [g for g in range(_MODEL.ngeom) if re.match(foot_re, mujoco.mj_id2name(_MODEL, mujoco.mjtObj.mjOBJ_GEOM, g) or "")]
+        assert len(_FOOT_GEOMS) >= 2
     m = _MODEL
     d = mujoco.MjData(m)
     with np.load(npz_path) as z:
@@ -111,16 +115,41 @@ def _foot_sole_height(npz_path: str, gate: np.ndarray) -> np.ndarray:
         jp = z["joint_pos"]
     idx = np.nonzero(gate)[0]
     out = np.empty(len(idx))
-    radius = m.geom_size[_FOOT_GEOMS, 0]
-    half = m.geom_size[_FOOT_GEOMS, 1]
+    gtypes = m.geom_type[_FOOT_GEOMS]
+    sizes = m.geom_size[_FOOT_GEOMS]
+
+    def _lowest(g: int) -> float:
+        cz = d.geom_xpos[g, 2]
+        gt = m.geom_type[g]
+        if gt == mujoco.mjtGeom.mjGEOM_CAPSULE:
+            r, half = m.geom_size[g, 0], m.geom_size[g, 1]
+            return cz - half * abs(d.geom_xmat[g].reshape(3, 3)[2, 2]) - r
+        if gt == mujoco.mjtGeom.mjGEOM_BOX:
+            sx, sy, sz = m.geom_size[g]
+            R = d.geom_xmat[g].reshape(3, 3)
+            # World-z support of a box: geom_xmat is local->world, so the corner
+            # depths along world z come from the THIRD ROW (not column):
+            # min_z = cz - (|R20|sx + |R21|sy + |R22|sz). Verified against exact
+            # 8-corner enumeration at Euler(20,35,40) deg: zero error (the earlier
+            # third-COLUMN form was off by ~9.5 mm for the X2 sole boxes).
+            # NOTE (provenance): the x2_bones_full_4gpu training run used the
+            # earlier column form via the compact library built 2026-10-28 01:49;
+            # the run was deliberately NOT rebuilt. Impact bound: the floating-feet
+            # gate only (20 rejected clips; unknown number of near-threshold flips).
+            return cz - (abs(R[2, 0]) * sx + abs(R[2, 1]) * sy + abs(R[2, 2]) * sz)
+        if gt == mujoco.mjtGeom.mjGEOM_MESH:
+            did = m.geom_dataid[g]
+            vadr, vnum = m.mesh_vertadr[did], m.mesh_vertnum[did]
+            v = m.mesh_vert[vadr:vadr + vnum].astype(np.float64) @ R.T + d.geom_xpos[g]
+            return float(v[:, 2].min())
+        raise ValueError(f"unsupported foot geom type {gt}")
+
     for k, t in enumerate(idx):
         d.qpos[:3] = root_pos[t]
         d.qpos[3:7] = root_quat[t]
         d.qpos[7:] = jp[t]
         mujoco.mj_kinematics(m, d)
-        cz = d.geom_xpos[_FOOT_GEOMS, 2]
-        axis_z = d.geom_xmat[_FOOT_GEOMS].reshape(-1, 3, 3)[:, 2, 2]  # world z of the capsule axis
-        out[k] = (cz - half * np.abs(axis_z) - radius).min()
+        out[k] = min(_lowest(g) for g in _FOOT_GEOMS)
     return out
 
 
@@ -143,7 +172,11 @@ def _one(path: str) -> tuple[str, int, str | None]:
     return name, frames, r
 
 
-def main(npz_dir: Path, workers: int = 24, out: Path | None = None) -> None:
+def main(npz_dir: Path, workers: int = 24, out: Path | None = None, robot: str = "g1") -> None:
+    global ROBOT, STAND_Z
+    ROBOT = robot
+    if robot == "x2":
+        STAND_Z = X2_STAND_Z
     files = sorted(str(p) for p in npz_dir.glob("*.npz"))
     print(f"{len(files)} clips")
     with mp.Pool(workers) as pool:

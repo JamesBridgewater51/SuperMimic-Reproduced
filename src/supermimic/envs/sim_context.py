@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-XI_DIM = 33
+XI_DIM = 33  # g1: friction 1 + encoder bias 29 + com 3; x2 = 35
 
 
 class SimContext:
@@ -36,5 +36,4 @@ class SimContext:
             com = (ipos[self.com_body_global] - self.com_nominal).expand(n, 3)
         bias = self.robot.data.encoder_bias
         xi = torch.cat([friction.reshape(n, 1), bias, com], dim=-1)
-        assert xi.shape == (n, XI_DIM)
         return xi.clone()

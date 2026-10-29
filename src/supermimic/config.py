@@ -15,6 +15,7 @@ from supermimic.world_model.world_model import WorldModelCfg
 class DataCfg:
     npz_dir: Path = Path("data/npz/lafan1")
     clips: list[str] | None = None  # None = all npz in npz_dir
+    clips_file: Path | None = None  # newline-separated clip names; overrides clips
     limit: int | None = None
     manifest: Path | None = None  # csv with name,keep (filter_bones_seed.py output)
     library: Path | None = None  # packed compact library (.pt from build_library.py); overrides npz_dir
@@ -33,6 +34,7 @@ class EnvCfg:
     future_frames: int = 10
     compact_library: bool = False
     anchor_obs: bool = False
+    robot: str = "g1"
 
 
 @dataclass
@@ -52,6 +54,7 @@ class ScheduleCfg:
 class TrainConfig:
     run_name: str = "debug"
     log_root: Path = Path("logs")
+    ckpt_root: Path | None = None  # separate checkpoints from logs (storage contract); None -> log_root
     seed: int = 0
     device: str = "cuda:0"
     data: DataCfg = field(default_factory=DataCfg)

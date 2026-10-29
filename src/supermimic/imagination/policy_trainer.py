@@ -119,8 +119,10 @@ class PolicyTrainer:
                     self.critic_opt.zero_grad(set_to_none=True)
                     closs.backward()
                     allreduce_grads(self.critic)
-                    torch.nn.utils.clip_grad_norm_(self.critic.parameters(), cfg.critic_grad_clip)
-                    self.critic_opt.step()
+                    cgn = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), cfg.critic_grad_clip)
+                    if torch.isfinite(cgn):
+                        self.critic_opt.step()
+                    self.critic_opt.zero_grad(set_to_none=True)
                     last = closs.detach()
             metrics["critic_loss"] = float(last)
             metrics["critic_value_mean"] = float(values.mean())
