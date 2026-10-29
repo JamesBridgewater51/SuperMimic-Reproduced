@@ -51,15 +51,27 @@ class WorldModelTrainer:
 
     def update(self, buffer: ReplayBuffer) -> dict[str, float]:
         agg: dict[str, torch.Tensor] = {}
+        import torch.distributed as dist
         for _ in range(self.cfg.batches_per_update):
             w = buffer.sample_windows(self.cfg.batch_size, self.cfg.window)
-            if w.states.shape[-1] == 0:
-                continue  # fully non-finite batch (transient sim blowup) — skip
+            # Cross-rank-consistent empty-batch skip: if ANY rank drew a fully
+            # poisoned batch, every rank skips this minibatch (a per-rank skip
+            # alone would deadlock the gradient all-reduce).
+            bad = torch.tensor([1.0 if w.states.shape[1] == 0 else 0.0], device=w.states.device)
+            if dist.is_available() and dist.is_initialized():
+                dist.all_reduce(bad, op=dist.ReduceOp.MAX)
+            if bad.item() > 0:
+                continue
             loss, m = self.loss_on(w)
             self.opt.zero_grad(set_to_none=True)
             loss.backward()
             allreduce_grads(self.wm)
             gn = torch.nn.utils.clip_grad_norm_(self.wm.parameters(), self.cfg.grad_clip)
+            # Inf/nan gradients all-reduce to inf/nan on every rank, so this
+            # skip is rank-consistent by construction.
+            if not torch.isfinite(gn):
+                self.opt.zero_grad(set_to_none=True)
+                continue
             self.opt.step()
             m["loss"] = loss.detach()
             m["grad_norm"] = gn.detach()

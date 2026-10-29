@@ -145,9 +145,9 @@ class ReplayBuffer:
         ok &= wb.a_exec.abs().amax(dim=(0, 2)) < 1.0e3
         ok &= wb.reward.abs().amax(dim=0) < 1.0e3
         if not bool(ok.all()):
-            if not bool(ok.any()):
-                return wb  # empty handled by callers
             idx = ok.nonzero(as_tuple=True)[0]  # window indices, dim=1 for (k, n, .) tensors
+            if idx.numel() == 0:
+                idx = torch.empty(0, dtype=torch.long, device=idx.device)
             wb = WindowBatch(
                 states=wb.states[:, idx],       # (k+1, m, D)
                 a_exec=wb.a_exec[:, idx],       # (k, m, D)
