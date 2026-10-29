@@ -56,10 +56,32 @@ def _x2_spec() -> RobotSpec:
     )
 
 
-_SPECS = {"g1": _g1_spec, "x2": _x2_spec}
+_SPECS = {
+    "g1": _g1_spec,
+    "x2": _x2_spec,
+    "x2v_foot3": _x2_spec,
+    "x2v_act": _x2_spec,
+    "x2v_headlock": _x2_spec,
+}
+
+
+def _variant_spec(base: str, name: str) -> RobotSpec:
+    from supermimic.assets import x2_constants
+
+    fn = {
+        "x2v_foot3": x2_constants.get_x2v_foot3_robot_cfg,
+        "x2v_act": x2_constants.get_x2v_act_robot_cfg,
+        "x2v_headlock": x2_constants.get_x2v_headlock_robot_cfg,
+    }[name]
+    spec = _x2_spec()
+    import dataclasses
+
+    return dataclasses.replace(spec, name=name, get_robot_cfg=fn)
 
 
 def get_robot(name: str) -> RobotSpec:
+    if name in ("x2v_foot3", "x2v_act", "x2v_headlock"):
+        return _variant_spec("x2", name)
     if name not in _SPECS:
         raise ValueError(f"unknown robot {name!r}; available: {sorted(_SPECS)}")
     return _SPECS[name]()

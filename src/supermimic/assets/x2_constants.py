@@ -108,3 +108,68 @@ for a in X2_ACTUATORS:
     assert e is not None and s is not None
     for n in a.target_names_expr:
         X2_ACTION_SCALE[n] = 0.25 * e / s
+
+
+# ------------------------------------------------------------------ attribution variants
+
+def get_x2v_foot3_robot_cfg() -> EntityCfg:
+    """V1: 3-box split foot (heel/mid/toe) instead of one sole box.
+
+    Tests the contact-richness suspect: G1's 7-capsule feet provide far richer
+    contact than X2's single flat plate, and X2's failures concentrate in
+    kneeling/deep-pose families that stress the support surface.
+    """
+    import mujoco
+    spec = mujoco.MjSpec.from_file(str(X2_XML))
+    # split each sole box into three along x: [-0.053,-0.018],[-0.018,0.018],[0.018,0.053] (half-lengths ~0.0177/0.018/0.0177)
+    for body in spec.bodies:
+        for g in body.geoms:
+            if g.name and g.name.endswith("_sole_collision"):
+                side = "left" if g.name.startswith("left") else "right"
+                cx = g.pos[0]
+                g.size = [0.0177, g.size[1], g.size[2]]
+                g.pos = [cx - 0.0353, g.pos[1], g.pos[2]]
+                for off, tag in ((0.0, "mid"), (0.0354, "toe")):
+                    ng = body.add_geom(
+                        type=mujoco.mjtGeom.mjGEOM_BOX,
+                        name=f"{side}_ankle_roll_link_sole_{tag}_collision",
+                        size=[0.0177, g.size[1], g.size[2]],
+                        pos=[cx + off, g.pos[1], g.pos[2]],
+                        group=3, mass=0.0,
+                    )
+    cfg = get_x2_robot_cfg()
+    cfg.spec_fn = lambda: spec
+    return cfg
+
+
+def get_x2v_act_robot_cfg() -> EntityCfg:
+    """V2: uniform G1-class (5020) armature on every joint.
+
+    Tests the actuator-assumption suspect: X2 armatures were assumed from G1
+    motor classes by role; this variant removes the role mapping entirely.
+    """
+    import dataclasses
+
+    acts = tuple(
+        dataclasses.replace(a, armature=_ARM_5020, stiffness=_ARM_5020 * NATURAL_FREQ**2,
+                            damping=2.0 * DAMPING_RATIO * _ARM_5020 * NATURAL_FREQ)
+        for a in X2_ACTUATORS
+    )
+    art = dataclasses.replace(X2_ARTICULATION, actuators=acts)
+    cfg = get_x2_robot_cfg()
+    cfg.articulation = art
+    return cfg
+
+
+def get_x2v_headlock_robot_cfg() -> EntityCfg:
+    """V3: head joints effectively locked (tiny effort, high stiffness)."""
+    import dataclasses
+
+    acts = tuple(
+        dataclasses.replace(a, effort_limit=0.05) if set(a.target_names_expr) & {"head_yaw_joint", "head_pitch_joint"} else a
+        for a in X2_ACTUATORS
+    )
+    art = dataclasses.replace(X2_ARTICULATION, actuators=acts)
+    cfg = get_x2_robot_cfg()
+    cfg.articulation = art
+    return cfg
