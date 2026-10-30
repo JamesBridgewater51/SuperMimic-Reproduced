@@ -79,6 +79,10 @@ def build(urdf_path: Path, meshdir: str) -> mujoco.MjSpec:
 
     spec = mujoco.MjSpec()
     spec.compiler.meshdir = meshdir
+    # Serialize angle-valued fields (joint ranges) as RADIANS. With the default
+    # degree=True, MjSpec.to_xml() divides ranges by 180/pi, silently pinning
+    # every joint to ~1/57 of its true range (knee 2.41 rad -> 0.042 rad).
+    spec.compiler.degree = False
     spec.compiler.autolimits = True
 
     # ---- meshes (both visual and collision reference the same STL files) ----
